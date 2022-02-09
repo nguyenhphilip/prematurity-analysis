@@ -1,0 +1,92 @@
+---
+title: "updated-prematurity"
+author: "Phil Nguyen"
+date: "9/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# load libraries
+library(tidyverse)
+library(here)
+library(broom)
+library(skimr)
+library(readxl)
+library(formattable)
+library(rstatix)
+options(scipen = 999)
+# set seed for reproducibility - ensures results are the same each time script is run
+set.seed(100) 
+```
+
+```{r}
+# load matched prematurity data
+prematurity <- read_csv("2p0p1-prematurity-data.csv") %>%
+  # sum ravlt trials
+  mutate(pea_ravlt_sum1_5 = (pea_ravlt_sd_trial_i_tc + 
+                           pea_ravlt_sd_trial_ii_tc + 
+                           pea_ravlt_sd_trial_iii_tc + 
+                           pea_ravlt_sd_trial_iv_tc +
+                           pea_ravlt_sd_trial_v_tc))
+
+# select all ravlt trials
+ravlt1_5 <- c('pea_ravlt_sd_trial_i_tc', 'pea_ravlt_sd_trial_ii_tc', 'pea_ravlt_sd_trial_iii_tc', 'pea_ravlt_sd_trial_iv_tc', 'pea_ravlt_sd_trial_v_tc')
+```
+
+
+```{r}
+# we want to compare CBCL and neurocog scores between prematurity categories, with covariates included
+
+# this chunk allows you to run an anova for every outcome variable of interest
+nested_premat <- prematurity %>% 
+  # pivot from wide to long dataframe to nest data by outcome for analyses
+  pivot_longer(cols = c(contains("cbcl"), 
+                        contains("nihtbx"), 
+                        contains("lmt"), 
+                        contains("pea")), 
+               names_to = "test", 
+               values_to = "score") %>%
+  # remove individual ravlt scores since we aggregated them above in previous chunk
+  filter(!test %in% ravlt1_5) %>%
+  group_by(test) %>%
+  arrange(test) %>%
+  nest() %>%
+  # run models
+  mutate(models = lapply(data, function(df) anova_test(score ~ premature_category + interview_age + demo_sex_v2 + scanner_num + race_ethnicity + combined_income_cat, data = df)))
+
+
+full_unnested <- nested_premat %>% 
+  unnest_wider(models) %>% 
+  unnest(-data) %>%
+  arrange(Effect) %>%
+  filter(Effect == 'premature_category') %>%
+  select(-data)
+
+full_unnested
+
+```
+
+```{r}
+
+# same as above except using linear model.
+l <- prematurity %>% 
+  pivot_longer(cols = c(contains("cbcl"), contains("nihtbx"), contains("lmt"), contains("pea")), 
+               names_to = "test", values_to = "score") %>%
+  filter(!test %in% ravlt1_5) %>%
+  group_by(test) %>%
+  arrange(test) %>%
+  nest() %>%
+  mutate(models = lapply(data, function(df) tidy(lm(score ~ premature_category + interview_age + demo_sex_v2 + scanner_num + race_ethnicity + combined_income_cat, data = df))))
+
+l_m <- l %>%
+  unnest_auto(models) %>%
+  unnest(-data) %>%
+  mutate(p.value = round(p.value, 4)) %>%
+  select(-data)
+
+l_m
+
+```
+
+
